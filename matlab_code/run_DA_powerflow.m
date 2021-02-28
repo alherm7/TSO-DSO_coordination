@@ -15,13 +15,13 @@ disp([' '])
 
 % variance_wind(1:3) = variance_base(1:3)*wind_factor_grided(kk);
 % mean_wind(1:3) = mean_base(1:3)*wind_factor_grided(kk);
-variance_wind = variance_base*wind_factor_grided(kk)^1.5;
+variance_wind = variance_base*wind_factor_grided(kk);
 mean_wind = mean_base*wind_factor_grided(kk);
 
 % 	variance = [0.01]*wind_factor(kk);
 % 	mean = [0.8]*wind_factor(kk);
 
-scenarios = scenario_generator(mpc,variance_wind,mean_wind,300,'default',false);
+scenarios = scenario_generator(mpc,variance_wind,mean_wind,1000,'default',false);
 
 for k = 1:nscen_OOS
 	mpc.RTscen(:,3+3*(k-1)) = scenarios(nscen_IS+k,:);

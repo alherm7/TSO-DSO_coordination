@@ -1,6 +1,6 @@
-function [result_pccoptim] = PCC_optim(data,kk)
+function [result_pccoptim] = PCC_optim_EVPI(data,kk)
 
-tolerance = 0.01;
+tolerance = 0.001;
 cc{1} = double.empty(1,0);
 [~,~,~,~,~,~,~,~,~,~,~,...
 	ng,nd,~,~,~,~,~,~,~,~,...
@@ -31,10 +31,12 @@ dual_DA_dem{1} = zeros(nd,nscen);
 dual_DA_DR{1} = zeros(nDR,nscen);
 dual_day_ahead_wind{1} = zeros(nw,nscen);
 
-p_gen_DA_hat{1} = zeros(ng,1);
-p_dem_DA_hat{1} = zeros(nd,1);
-p_DR_DA_hat{1} = zeros(nDR,1);
-wind_DA_hat{1} = zeros(nw,1);
+for s = 1:nscen
+    p_gen_DA_hat{1,s} = zeros(ng,1);
+    p_dem_DA_hat{1,s} = zeros(nd,1);
+    p_DR_DA_hat{1,s} = zeros(nDR,1);
+    wind_DA_hat{1,s} = zeros(nw,1);
+end
 
 cost_RT{1} = -100000 * ones(nscen,1);
 time_all = tic;
@@ -61,14 +63,15 @@ for iter = 1:100
 	
 % 	[DA_outcome] = DA_market_KKT(data, dual_DA_gen, dual_DA_dem, cost_RT,... 
 % 		iter, p_gen_DA_hat, p_dem_DA_hat,p_gen_DA_tilde,p_dem_DA_tilde);
-	t_master = tic;
-	[DA_outcome] = PCC_optimizer_DA_KKT_simple(data,dual_DA_gen,dual_DA_dem,...
-		dual_day_ahead_wind,cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,kk);
-	time_master = toc(t_master);
-	disp(['WPP: ' num2str(kk) ', PCC Optimizer, Benders It.: ' num2str(iter) ', Master Objective: ' num2str(DA_outcome.cost) '; Solver Time : ' num2str(time_master)]);
-	if iter == 4
-		npart_in = 25;
-	end
+    for s = 1:nscen
+        t_master = tic;
+        DA_outcome(s) = PCC_optimizer_DA_KKT_simple(data,dual_DA_gen(:,s),dual_DA_dem(:,s),...
+            dual_day_ahead_wind(:,s),cost_RT(s,1),iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,kk,s);
+        time_master = toc(t_master);
+        disp(['WPP: ' num2str(kk) ', PCC Optimizer, Benders It.: ' num2str(iter) ', Master Objective: ' num2str(DA_outcome.cost) '; Solver Time : ' num2str(time_master)]);
+        if iter == 4
+            npart_in = 25;
+        end
 % 	[result_DSO_lookahead,DA_outcome] = PCC_optimizer_full(data,dual_DA_gen,dual_DA_dem,...
 % 		dual_DA_DR,cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,p_DR_DA_hat,npart_in);
 	
@@ -84,19 +87,20 @@ for iter = 1:100
 % 	[result_lookahead_single] = DSO_lookahead(data,fe_up(e),fe_dn(e),...
 % 		pi_pcc_DA(e),pi_pcc_up(e),pi_pcc_dn(e),e);
 
-	p_gen_DA_hat{iter+1} = DA_outcome.p_gen_DA;
-	p_dem_DA_hat{iter+1} = DA_outcome.p_dem_DA;
-% 	p_DR_DA_hat{iter+1} = result_DSO_lookahead.p_DR_DA;
-	p_DR_DA_hat{iter+1} = p_DR_DA_hat{iter};
-	wind_DA_hat{iter+1} = DA_outcome.wind_DA;
-	
-	p_gen_hat_single = p_gen_DA_hat{iter+1};
-	p_dem_hat_single = p_dem_DA_hat{iter+1};
-	p_DR_hat_single = p_DR_DA_hat{iter+1};
-	wind_DA_hat_single = wind_DA_hat{iter+1};
+        p_gen_DA_hat{iter+1,s} = DA_outcome(s).p_gen_DA;
+        p_dem_DA_hat{iter+1} = DA_outcome(s).p_dem_DA;
+    % 	p_DR_DA_hat{iter+1} = result_DSO_lookahead.p_DR_DA;
+        p_DR_DA_hat{iter+1} = p_DR_DA_hat{iter};
+        wind_DA_hat{iter+1} = DA_outcome.wind_DA;
+
+        p_gen_hat_single = p_gen_DA_hat{iter+1};
+        p_dem_hat_single = p_dem_DA_hat{iter+1};
+        p_DR_hat_single = p_DR_DA_hat{iter+1};
+        wind_DA_hat_single = wind_DA_hat{iter+1};
+    end
 	
 	t_sub = tic;
-	parfor s = 1:nscen
+	for s = 1:nscen
 		RT_outcome(s) = RT_TSO_DSO(data,p_gen_hat_single,p_dem_hat_single,p_DR_hat_single,wind_DA_hat_single,s,iter,kk);
 	end
 	time_sub = toc(t_sub);
@@ -118,7 +122,7 @@ for iter = 1:100
 	
 	cuts(:,iter) = DA_outcome.alpha_cut;
 	
-	benders_it1 = figure('Visible','off');
+	benders_it1 = figure(5);
 	plot(1:iter,[prob_wscen(1,:)*cuts ; prob_wscen(1,:)*objective_sub])
 	xlabel('Iterations')
 	legend('Mean Benders Cut','Subproblem Objective','Location','best')
@@ -130,7 +134,7 @@ for iter = 1:100
 	saveas(benders_it1,[out_folder 'bender_it1_iteration' num2str(kk)],'fig')
 
     
-	benders_it2 = figure('Visible','off');
+	benders_it2 = figure(6);
 	plot(1:iter,[objective_master; prob_wscen(1,:)*objective_sub + cost_DA])
     xlabel('Iterations')
 	legend('Master Objective','Subproblem Objective','Location','best')
@@ -148,7 +152,6 @@ for iter = 1:100
 		/abs(objective_master(iter));
 	disp(['WPP: ' num2str(kk) ', PCC Optimizer, Benders It.: ' num2str(iter)  ', Relative Gap: ' num2str(relative_gap)]);
 	if  relative_gap < tolerance
-        cost = prob_wscen(1,:)*objective_sub(:,iter) + cost_DA(iter);
 		disp(['WPP: ' num2str(kk) ', PCC Optimizer, Benders algorithm has converged to within tolerance after ' num2str(iter) ' iterations and ' num2str(time_benders) ' seconds.'])
 		break;
 	end
@@ -161,7 +164,6 @@ t_solver_total = sum(time_master_solve) + sum(sum(time_subprob_solve));
 
 result_pccoptim.DA_outcome = DA_outcome;
 result_pccoptim.RT_outcome = RT_outcome;
-result_pccoptim.cost = cost;
 result_pccoptim.t_solver_total = t_solver_total;
 result_pccoptim.time_master_solve = time_master_solve;
 result_pccoptim.time_subprob_solve = time_subprob_solve;

@@ -1,5 +1,15 @@
 function mpc = case_24TSO_3DSO
+%CASE5  Power flow data for modified 5 bus, 5 gen case based on PJM 5-bus system
+%   Please see CASEFORMAT for details on the case file format.
+%
+%   Based on data from ...
+%     F.Li and R.Bo, "Small Test Systems for Power System Economic Studies",
+%     Proceedings of the 2010 IEEE Power & Energy Society General Meeting
 
+%   Created by Rui Bo in 2006, modified in 2010, 2014.
+%   Distributed with permission.
+
+%   MATPOWER
 
 %% MATPOWER Case Format : Version 2
 mpc.version = '3';

@@ -49,8 +49,7 @@ else
 	incidentDR = full(incidentDR);
 end
 
-% set your desired solver below and uncomment
-cvx_solver mosek % must be mosek, gurobi does not work here for some reason
+cvx_solver Mosek
 
 
 [area_codes, n_areas, DSO_codes, fbusL_area, tbusL_area, branch_num_area, ...
@@ -93,7 +92,7 @@ end
 %%
 cvx_begin quiet
 	
-	cvx_precision high
+% 	cvx_precision high
 
 	variable pup_DR(nDR) nonnegative
 	variable pdn_DR(nDR) nonnegative
@@ -319,17 +318,17 @@ disp(['WPP: ' num2str(kk) ', Benders sub-prob. It.: ' num2str(iter) ', Scenario:
 congestion = zeros(nb,nb);
 s_flow = sqrt(p_flow.^2 + q_flow.^2);
 for l = 1:nl
-	if any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l))) < 0.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l)) < 0
+	if any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l))) < 10.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l)) < 0
 % 		disp(['Line ' num2str(l) ' (from node ' num2str(fbusL(l)) ' to node ' num2str(tbusL(l)) ' in TSO network ) ' ' in Scenario ' num2str(s) ' is congested'])
 		congestion(fbusL(l),tbusL(l)) = -1;
-	elseif any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l))) < 0.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l)) > 0
+	elseif any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l))) < 10.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l)) > 0
 		congestion(fbusL(l),tbusL(l)) = 1;
 	elseif any(l == cell2mat(branch_num_ext_area(2:end) ) ) ...
-			&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l))) < 0.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l)) < 0
+			&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l))) < 10.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l)) < 0
 % 		disp(['Line ' num2str(l) ' (from node ' num2str(fbusL(l)) ' to node ' num2str(tbusL(l)) ' in DSO feeder) ' ' in Scenario ' num2str(s) ' is congested'])
 		congestion(fbusL(l),tbusL(l)) = -1;
 	elseif any(l == cell2mat(branch_num_ext_area(2:end) ) ) ...
-			&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l))) < 0.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l)) > 0
+			&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l))) < 10.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l)) > 0
 		congestion(fbusL(l),tbusL(l)) = 1;
 	end
 end
@@ -381,7 +380,8 @@ RT_outcome.shed_p = shed_p;
 RT_outcome.wind_penetration_actual = wind_penetration_actual;
 RT_outcome.wind_penetration_total = wind_penetration_total;
 RT_outcome.wind_penetration_offered = wind_penetration_offered;
-
+RT_outcome.pup_wind = pup_wind;
+RT_outcome.pdn_wind = pdn_wind;
 
 RT_outcome.dual_day_ahead_gen = dual_day_ahead_gen;
 RT_outcome.dual_day_ahead_dem = dual_day_ahead_dem;

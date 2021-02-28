@@ -38,12 +38,15 @@ time_all = tic;
 
 p_gen_DA_tilde = Pmax_gen; %[200; 3; 2.5];
 p_dem_DA_tilde = Pmax_dem; %[200; 200; 5; 6];
-for iter = 1:100
-	disp(['WPP: ' num2str(kk) ', Conventional Market, Iteration ' num2str(iter)]);
+for iter = 1:1
+	disp(['WPP conventional market clearing: ' num2str(kk) ', Conventional Market, Iteration ' num2str(iter)]);
 
 	t_master = tic;
 	[DA_outcome] = DA_market_KKT(data, dual_DA_gen, dual_DA_dem, dual_day_ahead_wind, cost_RT,... 
 		iter, p_gen_DA_hat, p_dem_DA_hat, wind_DA_hat, p_gen_DA_tilde, p_dem_DA_tilde,kk);
+%     [DA_outcome] = DA_market_clearing(data, dual_DA_gen, dual_DA_dem, dual_day_ahead_wind, cost_RT,... 
+% 		iter, p_gen_DA_hat, p_dem_DA_hat, wind_DA_hat, p_gen_DA_tilde, p_dem_DA_tilde,kk);
+
 	time_master = toc(t_master);
 	disp(['WPP: ' num2str(kk) ', Conventional Market, Benders It.: ' num2str(iter) ', Master Objective: ' num2str(DA_outcome.cost) '; Solver Time : ' num2str(time_master)]);
 
@@ -82,32 +85,25 @@ for iter = 1:100
 	
 	cuts(:,iter) = DA_outcome.alpha_cut;
 	
-	figure(5)
-	plot(1:iter,[prob_wscen(1,:)*cuts ; prob_wscen(1,:)*objective_sub])
-	xlabel('Iterations')
-	legend('Mean Benders Cut','Subproblem Objective','Location','best')
-	grid on
-	
-	figure(6)
-	plot(1:iter,[objective_master; prob_wscen(1,:)*objective_sub + cost_DA])
-    xlabel('Iterations')
-	legend('Master Objective','Subproblem Objective','Location','best')
-	grid on
+
 
 	time_benders = toc(time_all);
     % prob_wscen(1,:)*cuts(:,iter) - prob_wscen(1,:)*objective_sub(:,iter)
 	relative_gap = abs(objective_master(iter) - ( prob_wscen(1,:)*objective_sub(:,iter) + cost_DA(iter)))...
 		/abs(objective_master(iter));
+    
+    cost = prob_wscen(1,:)*objective_sub(:,iter) + cost_DA(iter);
 	disp(['WPP: ' num2str(kk) ', Conv. Market, Benders It.: ' num2str(iter)  ', Relative Gap: ' num2str(relative_gap)]);
 	if  relative_gap < tolerance
 		disp(['WPP: ' num2str(kk) ', Conventional Market, Benders algorithm has converged to within tolerance after ' num2str(iter) ' iterations and ' num2str(time_benders) ' seconds.'])
 		break;
-	end
+    end
 
 	
 end
 result_pccoptim.DA_outcome = DA_outcome;
 result_pccoptim.RT_outcome = RT_outcome;
+result_pccoptim.cost = cost;
 
 
 

@@ -2,43 +2,42 @@ clc
 clear all
 close all
 
-
-%% in case the script is submitted to a cluster
 % configCluster
-
-% c = parcluster('dcc');
-% c.AdditionalProperties.EmailAddress = ;
-% c.AdditionalProperties.MemUsage = '4GB';
-% c.AdditionalProperties.WallTime = '05:00';
-% c.AdditionalProperties.ProcsPerNode = 20;
-% c.NumWorkers = 60;
+%
+% c = parcluster(dccClusterProfile());
+% c.AdditionalProperties.EmailAddress = 'alherm@dtu.dk';
+% c.AdditionalProperties.MemUsage = '10GB';
+% c.AdditionalProperties.WallTime = '10:00';
+% c.AdditionalProperties.ProcsPerNode = 1;
 % c.AdditionalProperties.QueueName = 'elektro';
-% % clust.AdditionalProperties.Queue = 'elektro';
-% c.saveProfile
-% nw_avail = str2num(getenv('LSB_DJOB_NUMPROC'));
 
-% disp(['NW Available: ' num2str(nw_avail)])
+nw_avail = str2num(getenv('LSB_DJOB_NUMPROC'));
 
-% pool=parpool(c,60);
+disp(['NW Available: ' num2str(nw_avail)])
+
+pool=parpool('local');
+% pool=parpool(c,20);
+
 
 % c.AdditionalProperties
-%% Setup CVX in case this has not been installed yet
+%%
 
 %cd cvx
-% cvx_setup
+% cvx_setup %../cvx_license_georgios.dat
 
 %cd ..
-%% setup the necessary variables and the case data
+%%
 
-test_case = 'case_24TSO_3DSO'; %name of the file with case data
+test_case = 'case_24TSO_3DSO_mod';
 mpc = eval(test_case);
 warning('off','all')
-simpoints = 24; % how many different wind penetration points do you want to simulate
-pcc_points = 1;
-wind_factor = linspace(0.2,4.6,simpoints);
-PCC_lim_factor = 1; %linspace(0.1,2.5,pcc_points);
-line_factor = 1; %linspace(0,2,35);
+simpoints = 20;
+pcc_points = 20;
+wind_factor = linspace(0.05,1.5,simpoints);
+PCC_lim_factor = 1;%linspace(0.1,2.5,pcc_points);
+line_factor = 1;%linspace(0,2,20);
 line_var_cap = 35; % line ID number to vary
+scenario_factor = 20;
 
 	[nb,busL,busN,busType,Pd,Qd,Vmax,Vmin,statusG,activeG,activeD,...
 	ng,nd,genL,genN,incidentG,demL,incidentD,incidentW,Qmax_gen,Qmin_gen,...
@@ -58,20 +57,20 @@ line_var_cap = 35; % line ID number to vary
 
 TSO_lines = sub2ind([nb nb],fbusL_area{1},tbusL_area{1});
 
-[PCC_lim_factor_grided,wind_factor_grided,line_factor_gridded] = ndgrid(PCC_lim_factor,wind_factor,line_factor);
+[PCC_lim_factor_grided,wind_factor_grided,line_factor_gridded, scenario_grid] = ndgrid(PCC_lim_factor,wind_factor,line_factor,scenario_factor );
 
 base_PCC_capacity = mpc.branch(PCC_branch_id,6);
 base_varLine_capacity = mpc.branch(line_var_cap,6);
 
-variance_base =	[750	740	760	300	300	300	300];
-mean_base = [200	200	200	40	40	40	10];
-
+Pdem_tot=sum(Pmax_dem);
+mean_base = round([0.25	0.25    0.15	0.10	0.10	0.05 0.1].*Pdem_tot.*1000)/1000;
+variance_base =	round((mean_base*0.1).^2.*1000)/1000;
 %%%%%%%%%%%%%%%%
-nscen_IS=4; % set the number of in-sample scenarios
+nscen_IS=scenario_factor; 
 in_sample_iter = numel(PCC_lim_factor_grided);
 [ii,jj,pp] = ind2sub(size(PCC_lim_factor_grided),1:numel(PCC_lim_factor_grided));
 
-nscen_OOS = 200;
+nscen_OOS = 300;
 outofsample_iter = numel(PCC_lim_factor_grided);
 
 gens_DSO = [];
@@ -88,46 +87,100 @@ for DSO_num = 1:length(DSO_codes)
 	windg_DSO = [windg_DSO; windg_area{DSO_num}];
 end
 
+
+% %% run the EVPI simulation
+% parfor kk = 1:in_sample_iter
+%     [results_PCCoptim_EVPI{kk}, results_PCCoptim_avg(kk)] = run_insample_optim_EVPI(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
+%     			wind_factor_grided,line_factor_gridded, line_var_cap,variance_base,mean_base,PCC_branch_id,scenario_grid(kk),kk);
+% end
+% save('./solutions/results_scen_increase.mat');
+% % 
+% % 
+% % 
+% %% run the VSS simulation
+% parfor kk = 1:in_sample_iter
+%     [results_PCCoptim_VSS(kk)] = run_insample_optim_VSS(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
+%     			wind_factor_grided,line_factor_gridded, line_var_cap,variance_base,mean_base,PCC_branch_id,scenario_grid(kk),kk);
+% end
+% save('./solutions/results_scen_increase_VSS.mat');
+% % 
+
+
+
 %% Run the in sample optimization
 
-% 
+
 t_sim_IS = tic;
-for kk = 1:in_sample_iter
-	[results_PCCoptim(kk), results_FC(kk), results_CM(kk)] ...
+% parfor kk = 1:16 
+% 	[results_PCCoptim(kk), results_FC(kk), results_CM(kk)] ...
+% 		= run_insample_optim(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
+% 			wind_factor_grided,line_factor_gridded, line_var_cap,variance_base,mean_base,PCC_branch_id,scenario_grid(kk),kk);
+% end
+parfor kk = 1:in_sample_iter
+	[results_PCCoptim(kk), results_FC(kk), results_CM(kk), results_DA_PF_market(kk),results_DA_scen_market(kk)] ...
 		= run_insample_optim(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
-			wind_factor_grided,line_factor_gridded,line_var_cap,variance_base,mean_base,PCC_branch_id,nscen_IS,kk);
+			wind_factor_grided,line_factor_gridded, line_var_cap,variance_base,mean_base,PCC_branch_id,scenario_grid(kk),kk);
 end
 t_fin_IS = toc(t_sim_IS);
 disp(['Time to finish IN-sample optimization: ' num2str(t_fin_IS)]);
-% save('./solutions/results_inceasing_windpenetration.mat');
-% load('./solutions/results_inceasing_windpenetration_run7.mat')
-%% Run the out-of-sample validation
+save('./solutions/results_var_PCC_capacity2.mat');
+% load('./solutions/results_inceasing_windpenetration.mat')
 
-for k = 1:in_sample_iter
-	DA_outcome_PCC(k) = results_PCCoptim(k).DA_outcome;
-	DA_outcome_CM(k) = results_CM(k).DA_outcome; 
+
+
+
+%% Run the out-of-sample validation
+if exist('results_CM.DA_outcome')
+    for k = 1:in_sample_iter
+        DA_outcome_PCC(k) = results_PCCoptim(k).DA_outcome;
+        DA_outcome_CM(k) = results_CM(k).DA_outcome; 
+        DA_outcome_PF_market(k) = results_DA_PF_market(k).DA_outcome;
+        DA_outcome_scen_market(k) = results_DA_scen_market(k).DA_outcome;
+    end
+else
+    for k = 1:in_sample_iter
+        DA_outcome_PCC(k) = results_PCCoptim(k).DA_outcome;
+    end
+    DA_outcome_CM = zeros(in_sample_iter,1); 
+    DA_outcome_PF_market = zeros(in_sample_iter,1);
+    DA_outcome_scen_market = zeros(in_sample_iter,1);
+    results_FC = zeros(in_sample_iter,1);
 end
 t_sim_OOS = tic;
-parfor kk = 1:outofsample_iter
-	[results_PCCoptim_OOS(kk), results_FC_OOS(kk), results_CM_OOS(kk)] ...
+% DA_outcome_CM = ones(in_sample_iter,1);
+% results_FC = ones(in_sample_iter,1);
+for kk = 1:outofsample_iter
+	[results_PCCoptim_OOS(kk), results_FC_OOS(kk), results_CM_OOS(kk), results_OOS_validation_PFmarket(kk),results_OOS_validation_scenMarket(kk)] ...
 		= run_outofsample_optim(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
-			wind_factor_grided,line_factor_gridded,line_var_cap,variance_base,mean_base,PCC_branch_id,nscen_IS,nscen_OOS,...
-			DA_outcome_PCC(kk),DA_outcome_CM(kk),results_FC(kk),kk);
+			wind_factor_grided,line_factor_gridded,line_var_cap,variance_base,mean_base,PCC_branch_id,20,nscen_OOS,...
+			DA_outcome_PCC(kk),DA_outcome_CM(kk),results_FC(kk),DA_outcome_PF_market(kk),DA_outcome_scen_market(kk),kk);
 end
 t_fin_OOS = toc(t_sim_OOS);
 disp(['Time to finish OUT-OF-sample validation: ' num2str(t_fin_OOS)]);
 
-% save('./solutions/results_inceasing_windpenetration.mat');
+save('./solutions/results_scen_increase_VSS.mat');
+
+
+%% plot the out-of-sample cost
+total_cost_oos = zeros(outofsample_iter,1);
+for kk = 1:outofsample_iter
+    total_cost_oos(kk) = results_PCCoptim_OOS(kk).DA_outcome.cost;
+    quant09_OOS(kk) = results_PCCoptim_OOS(kk).DA_outcome.quantile09;
+    quant01_OOS(kk) = results_PCCoptim_OOS(kk).DA_outcome.quantile01;
+end
+% figure
+% plot(total_cost_oos)
 
 %% Find the power flow incurred by the DA dispatches
 % The RT simulation is done without redispatch and without line flow and
 % voltage limits.
+
 for k = 1:in_sample_iter
 	DA_outcome_PCC(k) = results_PCCoptim(k).DA_outcome;
 	DA_outcome_CM(k) = results_CM(k).DA_outcome; 
 end
 t_sim_OOS = tic;
-parfor kk = 1:outofsample_iter
+for kk = 1:outofsample_iter
 	[results_PCCoptim_DAflow(kk), results_FC_DAflow(kk), results_CM_DAflow(kk)] ...
 		= run_DA_powerflow(mpc,base_PCC_capacity,PCC_lim_factor_grided,...
 			wind_factor_grided,line_factor_gridded,line_var_cap,variance_base,mean_base,PCC_branch_id,nscen_IS,nscen_OOS,...
@@ -163,40 +216,147 @@ wind_penetration_IS =  zeros(size(wind_factor_grided));
 
 for kk = 1:in_sample_iter
 	
-	co_optim_cost(kk) = results_FC(kk).cost_total;
+% 	co_optim_cost(kk) = results_FC(kk).cost_total;
 	pcc_optim_cost(kk) = results_PCCoptim(kk).DA_outcome.cost;
-	conv_cost(kk) = results_CM(kk).DA_outcome.cost;
+% 	conv_cost(kk) = results_CM(kk).cost;
+% 	DA_PF_cost(kk) = results_DA_PF_market(kk).cost;
+%     DA_SCEN_cost(kk) = results_DA_scen_market(kk).cost;
 	
+% 	cost_RT_cooptim(kk) = sum(results_FC(kk).cost_RT)/nscen_IS;
+% 	for s = 1:scenario_grid(kk)
+% 		cost_RT_PCCoptim(kk) = cost_RT_PCCoptim(kk)...
+% 			+ (results_PCCoptim(kk).RT_outcome(s).cost_RT)/nscen_IS;
+% 		cost_RT_conv(kk) = cost_RT_conv(kk)...
+% 			+ (results_CM(kk).RT_outcome(s).cost_RT)/nscen_IS;
+% 	end
 	
-	cost_RT_cooptim(kk) = sum(results_FC(kk).cost_RT)/nscen_IS;
-	for s = 1:nscen_IS
-		cost_RT_PCCoptim(kk) = cost_RT_PCCoptim(kk)...
-			+ (results_PCCoptim(kk).RT_outcome(s).cost_RT)/nscen_IS;
-		cost_RT_conv(kk) = cost_RT_conv(kk)...
-			+ (results_CM(kk).RT_outcome(s).cost_RT)/nscen_IS;
-	end
-	
-	DA_co_optim_cost(kk) = results_FC(kk).cost_DA;
-	DA_pcc_optim_cost(kk) = results_PCCoptim(kk).DA_outcome.cost_DA;
-	DA_conv_cost(kk) = results_CM(kk).DA_outcome.cost_DA;
+% 	DA_co_optim_cost(kk) = results_FC(kk).cost_DA;
+% % 	DA_pcc_optim_cost(kk) = results_PCCoptim(kk).DA_outcome.cost_DA;
+% 	DA_conv_cost(kk) = results_CM(kk).DA_outcome.cost_DA;
 
 
-	for s = 1:nscen_IS
+	for s = 1:scenario_grid(kk)
 		wind_penetration_PCC(kk) = wind_penetration_PCC(kk) + results_PCCoptim(kk).RT_outcome(s).wind_penetration_total;
-		wind_penetration_CM(kk) = wind_penetration_CM(kk) + results_CM(kk).RT_outcome(s).wind_penetration_total;
+% 		wind_penetration_CM(kk) = wind_penetration_CM(kk) + results_CM(kk).RT_outcome(s).wind_penetration_total;
 		
 		wind_penetration_IS(kk) = wind_penetration_IS(kk) + results_PCCoptim(kk).RT_outcome(s).wind_penetration_offered;
 	end
-	wind_penetration_FC(kk) = wind_penetration_FC(kk) + sum(results_FC(kk).wind_penetration_total);
-
-	wind_penetration_PCC(kk) = wind_penetration_PCC(kk)/nscen_IS;	
-	wind_penetration_CM(kk) = wind_penetration_CM(kk)/nscen_IS;			
-	wind_penetration_FC(kk) = wind_penetration_FC(kk)/nscen_IS;	
-	wind_penetration_IS(kk) = wind_penetration_IS(kk)/nscen_IS;
+% 	wind_penetration_FC(kk) = wind_penetration_FC(kk) + sum(results_FC(kk).wind_penetration_total);
+% 
+	wind_penetration_PCC(kk) = wind_penetration_PCC(kk)/scenario_grid(kk);	
+% 	wind_penetration_CM(kk) = wind_penetration_CM(kk)/nscen_IS;			
+% 	wind_penetration_FC(kk) = wind_penetration_FC(kk)/nscen_IS;	
+	wind_penetration_IS(kk) = wind_penetration_IS(kk)/scenario_grid(kk);
 
 	
 end
 
+%% plot the insample cost
+
+figure(1)
+plot(-squeeze(co_optim_cost))
+hold on
+plot(-squeeze(pcc_optim_cost))
+plot(-squeeze(conv_cost))
+plot(-squeeze(DA_PF_cost))
+plot(-squeeze(DA_SCEN_cost))
+legend('co-optim-cost','pcc','conv-cost','DA_PF','scen','location','best')
+hold off
+
+
+%% find congested lines
+
+for kk = 1:length(results_DA_PF_market)
+    for jj = 1:length(results_DA_PF_market(kk).RT_outcome)
+        [line_congested_f{kk,jj}, line_congested_t{kk,jj}] = find(results_DA_PF_market(kk).RT_outcome(jj).congestion(1:24,1:24));
+    end
+end
+for kk = 1:length(results_PCCoptim)
+    for jj = 1:length(results_PCCoptim(kk).RT_outcome)
+        [line_congested_f_PCC{kk,jj}, line_congested_t_PCC{kk,jj}] = find(results_PCCoptim(kk).RT_outcome(jj).congestion(1:24,1:24));
+    end
+end
+%% plot insample and outofsample cost together with quantiles
+
+scen_increase=figure(4);
+set(gcf,'PaperUnits','centimeters'); 
+plot(-squeeze(pcc_optim_cost),'LineWidth',3)
+hold on
+plot(-total_cost_oos,'LineWidth',3)
+z = 1:in_sample_iter;
+fi1 = fill([z,fliplr(z)], [quant09_OOS,fliplr(quant01_OOS)], 0.9*[1 1 1], 'EdgeColor','none');
+legend('In-sample', 'Out-of-sample (300 scenarios)','Out-of-sample quantiles (0.1 and 0.9)','FontSize',16,'Interpreter','latex','location','best')
+set(fi1,'facealpha',.6)
+
+grid on
+grid minor
+xlabel('\textbf{Number of in-sample scenarios}','Interpreter','latex')
+ylabel('\textbf{Expected social welfare [\$]}','Interpreter','latex')
+hold off
+ax = gca;
+ax.XAxis.FontSize = 10;
+ax.YAxis.FontSize = 10;
+set(gca,'TickLabelInterpreter','latex')
+set(gca,'FontWeight','bold','FontSize',16)
+ax.XAxis.TickLabelFormat = '\\textbf{%g}';
+ax.YAxis.TickLabelFormat = '\\textbf{%g}';
+fig = gcf;
+set(gcf,'Units','centimeters');
+screenposition = get(gcf,'Position');
+set(gcf,...
+    'PaperPosition',[0 0 screenposition(3:4)],...
+    'PaperSize',[screenposition(3:4)]);
+print -dpdf -painters epsFig
+saveas(scen_increase,'./solutions/scen_increase','pdf')
+
+
+%% plot the VSS
+
+VSS = zeros(in_sample_iter,1);
+clear cost_RT_PCC
+clear cost_RT_VSS
+for k = 1:in_sample_iter
+    for s = 1:k
+        cost_RT_VSS(s) = results_PCCoptim_VSS(k).RT_outcome(s).cost_RT;
+        cost_RT_PCC(s) = results_PCCoptim(k).RT_outcome(s).cost_RT;
+    end
+    VSS(k) = results_PCCoptim_VSS(k).DA_outcome.cost_DA + sum(cost_RT_VSS)/k -( results_PCCoptim(k).DA_outcome.cost_DA + sum(cost_RT_PCC)/k);
+    VSS2(k) = results_PCCoptim_VSS(k).DA_outcome.cost - results_PCCoptim(k).DA_outcome.cost;
+end
+VSS2(1) = 0;
+
+
+%% plot the EVPI
+EVPI = zeros(in_sample_iter,1);
+for k = 1:in_sample_iter
+    EVPI(k) = results_PCCoptim(k).DA_outcome.cost - results_PCCoptim_avg(k);
+end
+EVPI(1) = 0;
+EVPI_plot=figure(1);
+set(gcf,'PaperUnits','centimeters'); 
+plot(EVPI,'LineWidth',3)
+hold on
+plot(VSS2,'LineWidth',3)
+grid on
+grid minor
+xlabel('\textbf{Number of in-sample scenarios}','Interpreter','Latex')
+ylabel('\textbf{Expected social welfare [\$]}','Interpreter','Latex')
+legend('EVPI', 'VSS','FontSize',16,'Interpreter','latex','location','best')
+ax = gca;
+ax.XAxis.FontSize = 16;
+ax.YAxis.FontSize = 16;
+set(gca,'TickLabelInterpreter','latex')
+set(gca,'FontWeight','bold','FontSize',16)
+ax.XAxis.TickLabelFormat = '\\textbf{%g}';
+ax.YAxis.TickLabelFormat = '\\textbf{%g}';
+fig = gcf;
+set(gcf,'Units','centimeters');
+screenposition = get(gcf,'Position');
+set(gcf,...
+    'PaperPosition',[0 0 screenposition(3:4)],...
+    'PaperSize',[screenposition(3:4)]);
+print -dpdf -painters epsFig
+saveas(EVPI_plot,'./solutions/EVPI_VSS','pdf')
 %% extract the data to plot out-of-sample results
 
 co_optim_cost_OOS =  zeros(size(wind_factor_grided));
@@ -372,7 +532,7 @@ PCC_TSO_line_cong = squeeze(PCC_TSO_line_cong);
 FC_TSO_line_cong = squeeze(FC_TSO_line_cong);
 CM_TSO_line_cong = squeeze(CM_TSO_line_cong);
 
-%% Start plotting the results
+%%
 close all
 for k = 1:pcc_points
 IS_results_actualWP = figure;
@@ -568,6 +728,56 @@ saveas(tranformer_flow_plot,['./solutions/p_flow_transformers_FC' num2str(k)],'p
 
 end
 
+%% plot SW without STD from OOS results
+clc
+% close all
+
+z = wind_penetration_OOS(1,:)'*100;
+normal = wind_penetration_OOS(1,:)*100; 
+
+SW_cooptim = -co_optim_cost_OOS(1,:);
+SW_PCC = -pcc_optim_cost_OOS(1,:);
+SW_no_coordination = -conv_cost_OOS(1,:);
+SW_DA_PF = -[results_DA_PF_market.cost];
+SW_DA_scen = -[results_DA_scen_market.cost];
+
+res1 = figure(19);
+hold on
+plot(normal,SW_cooptim,'LineWidth',2,'Marker','x','MarkerSize',4)
+plot(normal,SW_PCC,'LineWidth',2,'Marker','s','MarkerSize',4)
+plot(normal,SW_no_coordination,'LineWidth',2,'Marker','d','MarkerSize',4)
+plot(normal,SW_DA_PF,'LineWidth',2,'Marker','+','MarkerSize',4)
+plot(normal,SW_DA_scen,'LineWidth',2,'Marker','o','MarkerSize',4)
+grid on
+grid minor
+hold off
+xlim([min(z),max(z)])
+axes1 = gca;
+grid on
+
+fontsize=12;
+xlabel('\textbf{Wind penetration [\%]}','Interpreter','latex')
+ylabel('\textbf{Expected social welfare [\$]}','Interpreter','latex')
+% legend('\textbf{Full Coordination (Ideal Benchmark)}','\textbf{PCC Optimizer (proposed coord.)}','\textbf{No Coordination}','Location','best','Interpreter','latex','FontSize',10)
+set(gca,'FontWeight','bold','FontSize',fontsize)
+set(gca,'TickLabelInterpreter','latex')
+axes1.XAxis.TickLabelFormat = '\\textbf{%g}';
+axes1.YAxis.TickLabelFormat = '\\textbf{%g}';
+axes1.XAxis.FontSize = fontsize;
+axes1.YAxis.FontSize = fontsize;
+legend('Full coordination (Ideal benchmark)','PCC optimizer (proposed coordination)','No coordination','Network-aware benchmark','Uncertainty-aware benchmark','Location','southwest','FontSize',12,'Interpreter','latex')
+
+
+set(res1,'Units','centimeters');
+screenposition = get(res1,'Position');
+set(res1,'PaperPositionMode','Auto',...
+    'PaperUnits','centimeters',...
+    'PaperSize',[screenposition(3:4)]);
+% print -dpdf -painters epsFig
+% saveas(EVPI_plot,'./solutions/EVPI_VSS','pdf')
+
+% set(OOS_STD_fig,'PaperSize',[15 11.5]);
+saveas(res1,'./solutions/OOS_results_all_no_STD','pdf')
 
 %% plot the SW together with the standard deviation
 clc
@@ -585,7 +795,7 @@ CM_TSO_congestion_plot = CM_TSO_congestion./max(max_congestion_level);
 
 
 % generate some data to plot
-normal = wind_penetration_OOS(1,:)*100;
+normal = wind_penetration_OOS(1,:)*100; 
 Parameter1_mean = -co_optim_cost_OOS(1,:);
 Parameter1_plus_std = FC_cost_OOS_quant09;
 Parameter1_minus_std = FC_cost_OOS_quant01;
@@ -598,9 +808,9 @@ Parameter3_minus_std = CM_cost_OOS_quant01;
 
 % create figure
 OOS_STD_fig = figure('Units', 'normalized'); %, 'outerposition', [0 0 1 1]);
-colormap(OOS_STD_fig,'hot');
-% CT=cbrewer('div', 'RdYlGn', 13);
-% colormap(OOS_STD_fig,flipud(CT(2:end-2,:)));
+% colormap(OOS_STD_fig,'hot');
+CT=cbrewer('div', 'RdYlGn', 13);
+colormap(OOS_STD_fig,flipud(CT(2:end-2,:)));
 hold on
 
 % plot the two solid fillings without border
@@ -616,41 +826,52 @@ set(fi3,'facealpha',.6)
 plot(normal,Parameter1_mean,'k-','LineWidth',2,'Marker','x');
 plot(normal,Parameter1_plus_std,'k-')
 plot(normal,Parameter1_minus_std,'k-')
-scatter(normal,Parameter1_mean,30,FC_TSO_congestion_plot,'filled')
+scatter(normal,Parameter1_mean,60,FC_TSO_congestion_plot,'filled')
 
 
 plot(normal,Parameter2_mean,'k--','LineWidth',2,'Marker','x');
 plot(normal,Parameter2_plus_std,'k--')
 plot(normal,Parameter2_minus_std,'k--')
-scatter(normal,Parameter2_mean,30,PCC_TSO_congestion_plot,'filled')
+scatter(normal,Parameter2_mean,60,PCC_TSO_congestion_plot,'filled')
 
 plot(normal,Parameter3_mean,'k:','LineWidth',2,'Marker','x');
 plot(normal,Parameter3_plus_std,'k:')
 plot(normal,Parameter3_minus_std,'k:')
-scatter(normal,Parameter3_mean,30,CM_TSO_congestion_plot,'filled')
+scatter(normal,Parameter3_mean,60,CM_TSO_congestion_plot,'filled')
 
+fontsize = 12;
 c = colorbar;
 c.TickLabelInterpreter = 'latex';
 % c.TickLabelFormat = '\\textbf{%g}';
 c.Label.String = '\textbf{Congestion Level [p.u.]}';
 c.Label.Interpreter = 'latex';
+c.Label.FontSize = fontsize;
+c.FontSize = fontsize;
 % c.Label.FontWeight = 'bold';
 
 % some tweaking
 xlim([min(z),max(z)])
 axes1 = gca;
 grid on
-xlabel('\textbf{Wind Penetration [\%]}','Interpreter','latex')
-ylabel('\textbf{Expected Social Welfare [\$]}','Interpreter','latex')
+grid minor
+xlabel('\textbf{Wind penetration [\%]}','Interpreter','latex')
+ylabel('\textbf{Expected social welfare [\$]}','Interpreter','latex')
 % legend('\textbf{Full Coordination (Ideal Benchmark)}','\textbf{PCC Optimizer (proposed coord.)}','\textbf{No Coordination}','Location','best','Interpreter','latex','FontSize',10)
-legend('Full Coordination (Ideal Benchmark)','PCC Optimizer (proposed coord.)','No Coordination','Location','best')
-set(gca,'FontWeight','bold','FontSize',10)
+legend('Full coordination (Ideal benchmark)','PCC optimizer (proposed coord.)','No coordination','Location','best','FontSize',12)
+set(gca,'FontWeight','bold','FontSize',fontsize)
 set(gca,'TickLabelInterpreter','latex')
 axes1.XAxis.TickLabelFormat = '\\textbf{%g}';
 axes1.YAxis.TickLabelFormat = '\\textbf{%g}';
+axes1.XAxis.FontSize = fontsize;
+axes1.YAxis.FontSize = fontsize;
 
+set(gcf,'Units','centimeters');
+screenposition = get(gcf,'Position');
+set(gcf,'PaperPositionMode','Auto',...
+    'PaperUnits','centimeters',...
+    'PaperSize',[screenposition(3:4)]);
 
-set(OOS_STD_fig,'PaperSize',[15 11.5]);
+% set(OOS_STD_fig,'PaperSize',[15 11.5]);
 saveas(OOS_STD_fig,'./solutions/OOS_results_STD','pdf')
 
 %% plot the congestion level
@@ -784,13 +1005,14 @@ clc
 set(groot, 'defaultAxesTickLabelInterpreter','latex'); set(groot, 'defaultLegendInterpreter','latex');
 colors_avail = 'rgb';%[1 0 0; 0.8 0 0; 0.5 0 0];
 % set(groot, 'defaultLabelInterpreter','latex');
+k=1;
 for pccn = 1:length(PCC_branch_id)
 	
 	
 	
-	n_plot_st = 6;
-	n_plot = 4;
-	n_plot_en = 0;
+	n_plot_st = 1;
+	n_plot = 1;
+	n_plot_en = 14;
 	
 	wpp = wind_penetration_OOS(k,n_plot_st:n_plot:end-n_plot_en);
 	s_pcc = s_flow_PCC_RT_expec(pccn,n_plot_st:n_plot:end-n_plot_en);
@@ -852,18 +1074,24 @@ for pccn = 1:length(PCC_branch_id)
 	
 	
 	% pl_lim = plot(wind_penetration_OOS(k,:),plot_PCC_cap(3,:),':','LineWidth',2);
-	hline(base_PCC_capacity(pccn),'m:','Physical Limit');
-	xlabel('Wind Penetration [\%]','Interpreter','latex','FontSize',12)
-	ylabel('Apparent Power Flow in PCC [MVA]','Interpreter','latex','FontSize',12)
-	leg = legend('DA - PCC Optimizer','DA - Full Coordination','DA - No Coordination','Expect. RT Power Flow','0.9 and 0.1 quantile','location','northeast');
+	hline(base_PCC_capacity(pccn),'m:','Physical limit');
+	xlabel('\textbf{Wind penetration [\%]}','Interpreter','latex','FontSize',12,'FontWeight','bold')
+	ylabel('\textbf{Apparent power flow in PCC [MVA]}','Interpreter','latex','FontSize',12,'FontWeight','bold')
+	leg = legend('DA - PCC optimizer','DA - Full coordination','DA - No coordination','Expected RT Power Flow','0.9 and 0.1 quantile','location','north','FontSize',12);
 	ax = gca;
+    ax.XAxis.TickLabelFormat = '\\textbf{%g}';
 	grid on
 	ax.XTick = x_axis_tick; 
-	ax.XTickLabels = round(x_axis_tick*1000)/1000*100;
-	set(ax,'FontSize',12)
+	ax.XTickLabels = (round(x_axis_tick*1000)/1000*100);
+	set(ax,'FontSize',12,'FontWeight','bold')
+    
+    ax.YAxis.TickLabelFormat = '\\textbf{%g}';
 
-
-	set(bar_plot_PCC_flow,'PaperSize',[15 11.5]);
+    set(gcf,'Units','centimeters');
+    screenposition = get(gcf,'Position');
+    set(gcf,'PaperPositionMode','Auto',...
+    'PaperUnits','centimeters',...
+    'PaperSize',[screenposition(3:4)]);
 	saveas(bar_plot_PCC_flow,['./solutions/bar_flow_PCC' num2str(pccn)],'pdf')
 	hold off
 
@@ -936,15 +1164,15 @@ for k = 1:max(jj)
 	for kk = [1 2 3 4 5]%1:length(dems_area)
 		plot(base_varLine_capacity*line_factor,squeeze(sum(p_dem_tilde_PCC(dems_area{kk},k,:),1)),'LineWidth',2)
 	end
-	xlabel('\textbf{Physical Capacity of PCC 1 [MW]}','Interpreter','latex')
+	xlabel('\textbf{Physical capacity of PCC 1 [MW]}','Interpreter','latex')
 	ylabel('\textbf{Accumulated optimal caps on demands [MW]}','Interpreter','latex')
 	set(p_dem_tilde_plot,'PaperSize',[15.5 11.5]);
 	
 	
 	yyaxis right
 	plot(base_varLine_capacity*line_factor,-squeeze(pcc_optim_cost(1,k,:)),'LineStyle','--','LineWidth',2)
-	ylabel('\textbf{Social Welfare [\$]}','Interpreter','latex')
-	legend(feeder_name{[1 2 3 4 5 6]},'Location','best')
+	ylabel('\textbf{Expected social welfare [\$]}','Interpreter','latex')
+	legend(feeder_name{[1 2 3 4 5 6]},'Location','southeast','Interpreter','latex')
 
 	
 	axes1 = gca;
@@ -952,11 +1180,18 @@ for k = 1:max(jj)
 	axes1.YAxis(1).TickLabelFormat = '\\textbf{%g}';
 	axes1.YAxis(2).TickLabelFormat = '\\textbf{%g}';
 	axes1.YAxis(2).Color = 'k';
-	set(gca,'FontWeight','bold','FontSize',10)
+	set(gca,'FontWeight','bold','FontSize',12)
 	set(gca,'TickLabelInterpreter','latex')
 	
 	title(['\textbf{Wind Penetration ' num2str(round(wind_penetration_IS(1,k,1)*1000)/10) '\%}'],'Interpreter','latex');
 	grid on
+    grid minor
+    
+    set(gcf,'Units','centimeters');
+    screenposition = get(gcf,'Position');
+    set(gcf,'PaperPositionMode','Auto',...
+    'PaperUnits','centimeters',...
+    'PaperSize',[screenposition(3:4)]);
 	saveas(p_dem_tilde_plot,['./solutions/var_line_cap_DSO_dem_caps' num2str(k)],'pdf')
 	
 
@@ -970,3 +1205,24 @@ for k = 1:max(jj)
 
 
 end
+
+%% calculate solver times
+times_master_solve = nan(in_sample_iter,100);
+times_sub_solve = nan(100, nscen_IS,in_sample_iter);
+for kk = 1: in_sample_iter
+    times_master_solve(kk,1:length(results_PCCoptim(kk).time_master_solve)) = results_PCCoptim(kk).time_master_solve;
+    time_avg_master(kk) = mean(times_master_solve(kk,:),'omitnan');
+    
+    time_first_master(kk) = mean(times_master_solve(kk,1),'omitnan');
+    temp = times_master_solve(kk,~isnan(times_master_solve(kk,:)));
+    time_last_master(kk) = temp(end);
+    iterations_needed(kk) = length(temp);
+    
+    
+    times_sub_solve(1:size(results_PCCoptim(kk).time_subprob_solve,1),:,kk) = results_PCCoptim(kk).time_subprob_solve;
+end
+mean_master = mean(time_avg_master);
+mean_fist_master = mean(time_first_master);
+mean_last_master = mean(time_last_master);
+mean_iterations_needed = mean(iterations_needed);
+mean_sub_solve = mean(mean(mean(times_sub_solve,'omitnan')));

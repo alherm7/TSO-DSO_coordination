@@ -1,5 +1,6 @@
-function scenarios = scenario_generator(data,var_forcast,mean_forcast,nscen,rand_status,if_plot)
+function [scenarios,varargout] = scenario_generator(data,var_forcast,mean_forcast,nscen,rand_status,if_plot)
 
+nout = nargout;
 nwgen = length(data.wind_loc(:,1));
 x_loc = data.wind_loc(:,2);
 y_loc = data.wind_loc(:,3);
@@ -15,10 +16,18 @@ end
 
 for w1 = 1:nwgen
 	for w2 = 1:nwgen
-		sigma(w1,w2) = (var_forcast(w1) + var_forcast(w2))/2*1/(exp(dist_ft_wgen(w1,w2)/corr_length));
+		sigma(w1,w2) = sqrt(var_forcast(w1) * var_forcast(w2))*(1.1/(exp(dist_ft_wgen(w1,w2)/corr_length))-0.1);
 	end
 end
 
+for w1 = 1:nwgen
+	for w2 = 1:nwgen
+		normalized_sigma(w1,w2) = sigma(w1,w2)/(sqrt(var_forcast(w1))*sqrt(var_forcast(w2)));
+	end
+end
+if nout > 1
+    varargout{1} = normalized_sigma;
+end
 
 gm = gmdistribution(mean_forcast,sigma);
 

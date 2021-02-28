@@ -18,7 +18,7 @@ cc{1} = double.empty(1,0);
 	incident_singlephase,Y_ft,rBranch,xBranch,narea,prob_wscen,Wmax,Wmin,...
 	nw,nscen,Wmax_mean_DA,windgL,...
 	offer_wind_DA,offer_wind_up,offer_wind_dn] = Data_Reader(data_tso,cc);
-
+disp('Full coordination is starting')
 
 cvx_solver mosek
 
@@ -349,17 +349,17 @@ s_flow = sqrt(p_flow.^2 + q_flow.^2);
 for s = 1:nscen
 	congestion{s} = zeros(nb,nb);
 	for l = 1:nl
-		if any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l),s)) < 0.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l),s) < 0
+		if any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l),s)) < 10.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l),s) < 0
 	% 		disp(['Line ' num2str(l) ' (from node ' num2str(fbusL(l)) ' to node ' num2str(tbusL(l)) ' in TSO network ) ' ' in Scenario ' num2str(s) ' is congested'])
 			congestion{s}(fbusL(l),tbusL(l)) = -1;
-		elseif any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l),s)) < 0.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l),s) > 0
+		elseif any(l == branch_num_area{1}) && ( SlmMax(l) - abs(p_flow(fbusL(l),tbusL(l),s)) < 10.5 ) && (SlmMax(l) ~= 0) && p_flow(fbusL(l),tbusL(l),s) > 0
 			congestion{s}(fbusL(l),tbusL(l)) = 1;
 		elseif any(l == cell2mat(branch_num_ext_area(2:end) ) ) ...
-				&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l),s)) < 0.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l),s) < 0
+				&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l),s)) < 10.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l),s) < 0
 	% 		disp(['Line ' num2str(l) ' (from node ' num2str(fbusL(l)) ' to node ' num2str(tbusL(l)) ' in DSO feeder) ' ' in Scenario ' num2str(s) ' is congested'])
 			congestion{s}(fbusL(l),tbusL(l)) = -1;
 		elseif any(l == cell2mat(branch_num_ext_area(2:end) ) ) ...
-				&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l),s)) < 0.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l),s) > 0
+				&& ( SlmMax(l) - abs(s_flow(fbusL(l),tbusL(l),s)) < 10.5 ) && (SlmMax(l) ~= 0) && s_flow(fbusL(l),tbusL(l),s) > 0
 			congestion{s}(fbusL(l),tbusL(l)) = 1;
 		end
 	end
@@ -388,6 +388,13 @@ cooptim_outcome.wind_penetration_total = wind_penetration_total;
 cooptim_outcome.wind_penetration_offered = wind_penetration_offered;
 cooptim_outcome.congestion = congestion;
 cooptim_outcome.s_flow = s_flow;
+cooptim_outcome.pup_g = pup_g;
+cooptim_outcome.pdn_g = pdn_g;
+cooptim_outcome.pup_d = pup_d;
+cooptim_outcome.pdn_d = pdn_d;
+cooptim_outcome.pup_wind = pup_wind;
+cooptim_outcome.pdn_wind = pdn_wind;
+
 
 for s = 1:nscen
 	for k = 1:size(test_vec{s},2)
@@ -399,6 +406,8 @@ for s = 1:nscen
 % 		end
 	end
 end
-
+p_flow_mean = mean(p_flow,3);
+p_flow_ft = p_flow_mean(sub2ind(size(mean(p_flow,3)),fbusL,tbusL));
+cooptim_outcome.p_flow_ft = p_flow_ft;
 cooptim_outcome.tight1 = tight1;
 cooptim_outcome.tight2 = tight2;

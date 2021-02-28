@@ -1,4 +1,4 @@
-function [DA_market_outcome] = PCC_optimizer_DA_KKT_simple(data_tso,dual_DA_gen,dual_DA_dem,...
+function [DA_market_outcome] = PCC_optimizer_DA_KKT_simple_linear_powerflow(data_tso,dual_DA_gen,dual_DA_dem,...
 	dual_day_ahead_wind,cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,kk)
 
 
@@ -28,7 +28,7 @@ count = 0;
 err_count = 0;
 while count == err_count
     try
-        cvx_solver Mosek
+        cvx_solver Mosek_2
     catch
         pause(20)
         err_count = err_count + 1;
@@ -78,6 +78,9 @@ cvx_begin quiet
 % cvx_precision high
 variable p_gen_DA_tilde(ng)
 variable p_dem_DA_tilde(nd)
+variable p_inj(nb)
+variable p_flow(nb,nb)
+variable v_angle(nb)
 
 variable varsigma_g_plus(ng)
 variable varsigma_g_minus(ng)
@@ -91,7 +94,7 @@ variable varsigma_d_minus(nd)
 variable sigma_d_plus(nd)
 variable sigma_d_minus(nd)
 
-variable lambda_DA
+variable lambda_DA(nb)
 
 variable nu_minus(nw)
 variable nu_plus(nw)
@@ -172,6 +175,16 @@ for w = 1:nw
 		offer_wind_DA - lambda_DA - nu_minus(w) + nu_plus(w) == 0;
 % 	end
 end
+
+lambda_DA(fbus(l)) + eta_RT_p(fbus(l),tbus(l)) + 2*gamma_RT_p(fbus(l),tbus(l)) ...
+    - mu_p_RT(fbus(l),tbus(l),s) - mu_p_RT(tbus(l),fbus(l),s) ...
+    - 2*beta_RT(fbus(l),tbus(l),s)*rBranch(branch_num(l)) == 0; % p_flow -->
+
+
+lambda_p_RT(tbus(l),s) + eta_RT_p(tbus(l),fbus(l),s) + 2*gamma_RT_p(tbus(l),fbus(l),s) ...
+    - mu_p_RT(tbus(l),fbus(l),s) - mu_p_RT(fbus(l),tbus(l),s) ...
+    - 2*beta_RT(tbus(l),fbus(l),s)*rBranch(branch_num(l)) == 0; % p_flow <--
+
 %% complimentarity constraints
 for g = 1:ng
 	if any(g == gens_DSO)
@@ -223,7 +236,7 @@ sum(p_dem_DA) - shed_p <= VOLL_DA * (1 - shed_comp(2));
 
 %% primal constrains
 
-sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
+% sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
 
 
 % for DSO_num = 1:length(DSO_codes)
@@ -266,6 +279,39 @@ p_gen_DA_tilde <= Pmax_gen;
 p_dem_DA_tilde <= Pmax_dem;
 
 %%%%%%%%%%%%%%%%%
+%% TSO power flow in Real time with DC-power flow
+branch_num = branch_num_area{1};
+fbus = fbusL_area{1};
+tbus = tbusL_area{1};
+buses =  areas{1};
+% 	[~,~,gens_area] = intersect(buses,genL);
+% 	[~,~,dems_area] = intersect(buses,demL);
+% 	[~,~,windg_area] = intersect(buses,bus_wgen);
+
+for k = 1:length(fbus)
+    p_flow(fbus(k),tbus(k)) == 1/xBranch(branch_num(k)) * (v_angle(fbus(k)) - v_angle(tbus(k)));
+    p_flow(tbus(k),fbus(k)) == 1/xBranch(branch_num(k)) * (v_angle(tbus(k)) - v_angle(fbus(k)));
+end
+
+sum(p_flow,2) ==  p_inj;
+
+p_inj == incidentG' * p_gen_DA - incidentD' * p_dem_DA...
+                        + incidentW' * p_wind_DA + shed_p;
+
+
+
+v_angle(1) == 0;
+Wmin(:,s) <= p_wind_DA <= Wmax(:,s);
+
+for l = 1:length(fbus)
+    if SlmMax(branch_num(l)) ~= 0
+        p_flow(fbus(l),tbus(l)) <= SlmMax(branch_num(l));
+        p_flow(tbus(l),fbus(l)) <= SlmMax(branch_num(l));
+    end
+end
+
+0 <= shed_p <= incidentD' * p_d;
+
 
 %% dual feasibility
 varsigma_g_minus >= 0;

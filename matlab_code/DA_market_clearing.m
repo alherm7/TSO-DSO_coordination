@@ -1,4 +1,4 @@
-function [DA_market_outcome] = DA_market_KKT(data_tso,dual_DA_gen,dual_DA_dem,...
+function [DA_market_outcome] = DA_market_clearing(data_tso,dual_DA_gen,dual_DA_dem,...
 	dual_day_ahead_wind, cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,p_gen_DA_tilde,p_dem_DA_tilde,kk)
 
 
@@ -54,50 +54,23 @@ dems_T = find(ismember(demL,areas{1}));
 
 nw = length(windgL);
 
-% p_gen_DA_tilde = [1; 1; 1.5];
-% p_dem_DA_tilde = [2; 2; 3; 3];
-
 %% define variables
 cvx_begin quiet
 
 % cvx_precision high
 
-variable varsigma_g_plus(ng)
-variable varsigma_g_minus(ng)
-
-variable sigma_g_plus(ng)
-variable sigma_g_minus(ng)
-
-variable varsigma_d_plus(nd)
-variable varsigma_d_minus(nd)
-
-variable sigma_d_plus(nd)
-variable sigma_d_minus(nd)
-
-variable lambda_DA
-
-variable nu_minus(nw) nonnegative
-variable nu_plus(nw) nonnegative
-
-variable rho_minus
-variable rho_plus
-
 variable p_gen_DA(ng)
-variable p_dem_DA(nd)
+variable p_dem_DA(nd) nonnegative
 variable wind_DA(nw) nonnegative
-variable shed_p
+variable shed_p nonnegative
 
 variable alpha_cut(nscen)
 
-variable wind_comp(nw,2) binary
-variable gen_comp(ng,4) binary
-variable dem_comp(nd,4) binary
-variable shed_comp(2) binary
+dual variable lambda
 
-dual variable lambda_dual
-%% define cost function
 expression cost_gen(ng)
 expression cost_dem(nd)
+%% define cost function
 for m = 1:ng
 	if cost_type(m) == 2
 		for k = 1:nr_vals_cost
@@ -124,141 +97,44 @@ cost_DA = sum(cost_gen)-sum(cost_dem) + cost_shed + sum(cost_wind);
 
 
 cost_cuts = prob_wscen(1,:) * alpha_cut;
-cost = cost_DA + cost_cuts;
+cost = cost_DA;
 %% objective statement
 minimize(cost)
 
 subject to
-%% stationary constraints
-
-% for DSO_num = 1:length(DSO_codes)
-for g = 1:ng
-	if any(g == gens_DSO)
-		offer_gen_DA(g,2) - (varsigma_g_minus(g) - varsigma_g_plus(g)) - lambda_DA == 0;
-	elseif any(g == gens_T)
-		offer_gen_DA(g,2) - (sigma_g_minus(g) - sigma_g_plus(g)) - lambda_DA == 0;
-	end
-end
-% end
-% for DSO_num = 1:length(DSO_codes)
-for d = 1:nd
-	if any(d == dems_DSO)
-		-bid_dem_DA(d) - (varsigma_d_minus(d) - varsigma_d_plus(d)) + lambda_DA - rho_plus == 0;
-	elseif any(d == dems_T)
-		 -bid_dem_DA(d) - (sigma_d_minus(d) - sigma_d_plus(d)) + lambda_DA - rho_plus == 0;
-	end
-end
-% end
-
-VOLL_DA - lambda_DA - rho_minus + rho_plus == 0;
-
-for w = 1:nw
-% 	if any(w == windg_DSO)
-		offer_wind_DA - lambda_DA - nu_minus(w) + nu_plus(w) == 0;
-% 	end
-end
-%% complimentarity constraints
-for g = 1:ng
-	if any(g == gens_DSO)
-		varsigma_g_minus(g) <= VOLL_DA * gen_comp(g,1);
-		(p_gen_DA(g) - Pmin_gen(g)) <= VOLL_DA *  (1 - gen_comp(g,1));
-
-		varsigma_g_plus(g)  <= VOLL_DA * gen_comp(g,2);
-		p_gen_DA_tilde(g) - p_gen_DA(g) <= VOLL_DA * (1 - gen_comp(g,2));
-	elseif any(g == gens_T)
-		sigma_g_minus(g) <= VOLL_DA * gen_comp(g,3);
-		(p_gen_DA(g) - Pmin_gen(g)) <= VOLL_DA *  (1 - gen_comp(g,3));
-
-		sigma_g_plus(g)  <= VOLL_DA * gen_comp(g,4);
-		Pmax_gen(g) - p_gen_DA(g) <= VOLL_DA * (1 - gen_comp(g,4));
-	end
-end
-
-for d = 1:nd
-	if any(d == dems_DSO)
-		varsigma_d_minus(d) <= VOLL_DA * dem_comp(d,1);
-		(p_dem_DA(d) - Pmin_dem(d)) <= VOLL_DA *  (1 - dem_comp(d,1));
-
-		varsigma_d_plus(d)  <= VOLL_DA * dem_comp(d,2);
-		p_dem_DA_tilde(d) - p_dem_DA(d) <= VOLL_DA * (1 - dem_comp(d,2));
-	elseif any(d == dems_T)
-		sigma_d_minus(d) <= VOLL_DA * dem_comp(d,3);
-		(p_dem_DA(d) - Pmin_dem(d)) <= VOLL_DA *  (1 - dem_comp(d,3));
-
-		sigma_d_plus(d)  <= VOLL_DA * dem_comp(d,4);
-		Pmax_dem(d) - p_dem_DA(d) <= VOLL_DA * (1 - dem_comp(d,4));
-	end
-end
-
-for w = 1:nw
-	nu_minus(w) <= VOLL_DA *wind_comp(w,1);
-	wind_DA(w) <= VOLL_DA * (1 - wind_comp(w,1));
-	
-	nu_plus(w) <= VOLL_DA * wind_comp(w,2);
-	Wmax_mean_DA(w) - wind_DA(w) <= VOLL_DA * (1 - wind_comp(w,2));
-end
-rho_minus <= 1.5*VOLL_DA * shed_comp(1);
-shed_p <= VOLL_DA * (1 - shed_comp(1));
-
-rho_plus <= VOLL_DA * shed_comp(2);
-sum(p_dem_DA) - shed_p <= VOLL_DA * (1 - shed_comp(2));
-
-%% primal constrains
-
-lambda_dual : sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
-
+%% constraints
+% Day ahead market
+lambda : sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
 
 for DSO_num = 1:length(DSO_codes)
 	for k = 1:ng
 		if any(k == gens_area{DSO_num})
 			Pmin_gen(k) <= p_gen_DA(k) <= p_gen_DA_tilde(k);
-		else
+		elseif any(k == gens_T)
 			Pmin_gen(k) <= p_gen_DA(k) <= Pmax_gen(k);
 		end
 	end
 	
 	for k = 1:nd
-% 		for m = 1:length(dems_area{DSO_num})
-		if any(k == dems_area{DSO_num})
-			Pmin_dem(k) <= p_dem_DA(k) <= p_dem_DA_tilde(k);
-		else
-			Pmin_dem(k) <= p_dem_DA(k) <= Pmax_dem(k);
+		for m = 1:length(dems_area{DSO_num})
+			if any(k == dems_area{DSO_num}(m))
+				Pmin_dem(k) <= p_dem_DA(k) <= p_dem_DA_tilde(k);
+			elseif any(k == dems_T)
+				Pmin_dem(k) <= p_dem_DA(k) <= Pmax_dem(k);
+			end
 		end
-% 		end
 	end
+	
+
 end
 
 
-
-% 	0 <= p_wind_E_DA(DSO_num) <= sum(Wmax_mean_DA(windg_area{DSO_num}));
-% end
-
 0 <= wind_DA <= Wmax_mean_DA;
-0 <= shed_p <= sum(p_dem_DA);
-% 0 <= p_wind_T_DA <= sum(Wmax_mean_DA(windg_area_T));
 
 % p_gen_DA == fcoo_pg_DA;
 % p_dem_DA == fcoo_pd_DA;
 
 %%%%%%%%%%%%%%%%%
-
-%% dual feasibility
-varsigma_g_minus >= 0;
-varsigma_g_plus >= 0;
-varsigma_d_minus >= 0;
-varsigma_d_plus >= 0;
-
-sigma_g_minus >= 0;
-sigma_g_plus >= 0;
-sigma_d_minus >= 0;
-sigma_d_plus >= 0;
-
-nu_minus >= 0;
-nu_plus >= 0;
-
-rho_minus >= 0;
-rho_plus >= 0;
-
 %% Benders cuts
 alpha_min <= alpha_cut;
 
@@ -278,23 +154,20 @@ cvx_end
 DA_market_outcome.p_gen_DA = p_gen_DA;
 DA_market_outcome.p_dem_DA = p_dem_DA;
 DA_market_outcome.cost_DA = cost_DA;
-DA_market_outcome.lambda = lambda_DA;
-DA_market_outcome.lambda_dual = lambda_dual;
+DA_market_outcome.lambda = lambda;
 DA_market_outcome.cost_cuts = cost_cuts;
 DA_market_outcome.cost = cost;
 DA_market_outcome.alpha_cut = alpha_cut;
 DA_market_outcome.wind_DA = wind_DA;
-% DA_market_outcome.p_wind_T_DA = p_wind_T_DA;
-% DA_market_outcome.p_wind = p_wind_E_DA + p_wind_T_DA;
 DA_market_outcome.shed_p = shed_p;
 DA_market_outcome.cost_dem = cost_dem;
 DA_market_outcome.cost_gen = cost_gen;
-DA_market_outcome.cvx_status = cvx_status;
+
 
 if DA_market_outcome.shed_p > 10e-5
 	warning(['WPP: ' num2str(kk) ', Conventional Market, Benders Master Iteration: ' num2str(iter) ', There is load shedding in the Day-Ahead market']);
 	pause(3)
 end
 
-
 end
+

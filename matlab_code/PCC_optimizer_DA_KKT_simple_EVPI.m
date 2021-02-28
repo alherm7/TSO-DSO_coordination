@@ -1,5 +1,5 @@
-function [DA_market_outcome] = DA_market_KKT(data_tso,dual_DA_gen,dual_DA_dem,...
-	dual_day_ahead_wind, cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,p_gen_DA_tilde,p_dem_DA_tilde,kk)
+function [DA_market_outcome] = PCC_optimizer_DA_KKT_simple_EVPI(data_tso,dual_DA_gen,dual_DA_dem,...
+	dual_day_ahead_wind,cost_RT,iter,p_gen_DA_hat,p_dem_DA_hat,wind_DA_hat,kk,s)
 
 
 %% load parameters
@@ -23,8 +23,21 @@ cc{1} = double.empty(1,0);
 	n_wgen,nscen,Wmax_mean_DA,windgL,...
 	offer_wind_DA,offer_wind_up,offer_wind_dn] = Data_Reader(data_tso,cc);
 
-cvx_solver Gurobi
 
+count = 0;
+err_count = 0;
+while count == err_count
+    try
+        cvx_solver Mosek
+    catch
+        pause(20)
+        err_count = err_count + 1;
+    end
+    count = count + 1;
+end
+disp(['Error count: ', num2str(err_count)])
+
+nw = length(windgL);
 
 [area_codes, n_areas, DSO_codes, fbusL_area, tbusL_area, branch_num_area, ...
 	fbusL_ext_area, tbusL_ext_area, branch_num_ext_area, overlap,...
@@ -52,7 +65,9 @@ windg_area_T = find(ismember(windgL,areas{1}));
 gens_T = find(ismember(genL,areas{1}));
 dems_T = find(ismember(demL,areas{1}));
 
-nw = length(windgL);
+
+ng_DSO = length(gens_DSO);
+nd_DSO = length(dems_DSO);
 
 % p_gen_DA_tilde = [1; 1; 1.5];
 % p_dem_DA_tilde = [2; 2; 3; 3];
@@ -61,6 +76,8 @@ nw = length(windgL);
 cvx_begin quiet
 
 % cvx_precision high
+variable p_gen_DA_tilde(ng)
+variable p_dem_DA_tilde(nd)
 
 variable varsigma_g_plus(ng)
 variable varsigma_g_minus(ng)
@@ -76,15 +93,15 @@ variable sigma_d_minus(nd)
 
 variable lambda_DA
 
-variable nu_minus(nw) nonnegative
-variable nu_plus(nw) nonnegative
+variable nu_minus(nw)
+variable nu_plus(nw)
 
 variable rho_minus
 variable rho_plus
 
 variable p_gen_DA(ng)
 variable p_dem_DA(nd)
-variable wind_DA(nw) nonnegative
+variable wind_DA(nw)
 variable shed_p
 
 variable alpha_cut(nscen)
@@ -93,8 +110,6 @@ variable wind_comp(nw,2) binary
 variable gen_comp(ng,4) binary
 variable dem_comp(nd,4) binary
 variable shed_comp(2) binary
-
-dual variable lambda_dual
 %% define cost function
 expression cost_gen(ng)
 expression cost_dem(nd)
@@ -160,6 +175,8 @@ end
 %% complimentarity constraints
 for g = 1:ng
 	if any(g == gens_DSO)
+% 		gc = find(gens_DSO == g);
+		
 		varsigma_g_minus(g) <= VOLL_DA * gen_comp(g,1);
 		(p_gen_DA(g) - Pmin_gen(g)) <= VOLL_DA *  (1 - gen_comp(g,1));
 
@@ -176,6 +193,8 @@ end
 
 for d = 1:nd
 	if any(d == dems_DSO)
+% 		dc = find(dems_DSO == d);
+		
 		varsigma_d_minus(d) <= VOLL_DA * dem_comp(d,1);
 		(p_dem_DA(d) - Pmin_dem(d)) <= VOLL_DA *  (1 - dem_comp(d,1));
 
@@ -190,13 +209,12 @@ for d = 1:nd
 	end
 end
 
-for w = 1:nw
-	nu_minus(w) <= VOLL_DA *wind_comp(w,1);
-	wind_DA(w) <= VOLL_DA * (1 - wind_comp(w,1));
-	
-	nu_plus(w) <= VOLL_DA * wind_comp(w,2);
-	Wmax_mean_DA(w) - wind_DA(w) <= VOLL_DA * (1 - wind_comp(w,2));
-end
+nu_minus <= VOLL_DA *wind_comp(:,1);
+wind_DA <= VOLL_DA * (1 - wind_comp(:,1));
+
+nu_plus <= VOLL_DA * wind_comp(:,2);
+Wmax_mean_DA - wind_DA <= VOLL_DA * (1 - wind_comp(:,2));
+
 rho_minus <= 1.5*VOLL_DA * shed_comp(1);
 shed_p <= VOLL_DA * (1 - shed_comp(1));
 
@@ -205,33 +223,37 @@ sum(p_dem_DA) - shed_p <= VOLL_DA * (1 - shed_comp(2));
 
 %% primal constrains
 
-lambda_dual : sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
+sum(p_gen_DA) + sum(wind_DA) + shed_p == sum(p_dem_DA);
 
 
-for DSO_num = 1:length(DSO_codes)
+% for DSO_num = 1:length(DSO_codes)
 	for k = 1:ng
-		if any(k == gens_area{DSO_num})
+		if any(k == gens_DSO)
+% 			gc = find(gens_DSO == k);
+			
 			Pmin_gen(k) <= p_gen_DA(k) <= p_gen_DA_tilde(k);
 		else
 			Pmin_gen(k) <= p_gen_DA(k) <= Pmax_gen(k);
+			p_gen_DA_tilde(k) == 0;
 		end
 	end
 	
 	for k = 1:nd
 % 		for m = 1:length(dems_area{DSO_num})
-		if any(k == dems_area{DSO_num})
+		if any(k == dems_DSO)
+% 			dc = find(dems_DSO == k);
+
 			Pmin_dem(k) <= p_dem_DA(k) <= p_dem_DA_tilde(k);
 		else
 			Pmin_dem(k) <= p_dem_DA(k) <= Pmax_dem(k);
+			p_dem_DA_tilde(k) == 0;
 		end
 % 		end
-	end
-end
-
-
+% 	end
+	
 
 % 	0 <= p_wind_E_DA(DSO_num) <= sum(Wmax_mean_DA(windg_area{DSO_num}));
-% end
+end
 
 0 <= wind_DA <= Wmax_mean_DA;
 0 <= shed_p <= sum(p_dem_DA);
@@ -239,6 +261,9 @@ end
 
 % p_gen_DA == fcoo_pg_DA;
 % p_dem_DA == fcoo_pd_DA;
+
+p_gen_DA_tilde <= Pmax_gen;
+p_dem_DA_tilde <= Pmax_dem;
 
 %%%%%%%%%%%%%%%%%
 
@@ -267,19 +292,17 @@ for k = 1:iter
 		alpha_cut(s) >= cost_RT{k}(s) + sum(dual_DA_gen{k}(:,s) .* ( p_gen_DA - p_gen_DA_hat{k}  ) )...
 			+ sum(dual_DA_dem{k}(:,s) .* ( p_dem_DA - p_dem_DA_hat{k} ) ) ...
 			+ sum(dual_day_ahead_wind{k}(:,s) .* (wind_DA - wind_DA_hat{k} ) );
-		
 	end
 end
-
+time_master_solve = tic;
 cvx_end
-
+fin_time_master_solve = toc(time_master_solve);
 %% output
 
 DA_market_outcome.p_gen_DA = p_gen_DA;
 DA_market_outcome.p_dem_DA = p_dem_DA;
 DA_market_outcome.cost_DA = cost_DA;
 DA_market_outcome.lambda = lambda_DA;
-DA_market_outcome.lambda_dual = lambda_dual;
 DA_market_outcome.cost_cuts = cost_cuts;
 DA_market_outcome.cost = cost;
 DA_market_outcome.alpha_cut = alpha_cut;
@@ -287,12 +310,15 @@ DA_market_outcome.wind_DA = wind_DA;
 % DA_market_outcome.p_wind_T_DA = p_wind_T_DA;
 % DA_market_outcome.p_wind = p_wind_E_DA + p_wind_T_DA;
 DA_market_outcome.shed_p = shed_p;
-DA_market_outcome.cost_dem = cost_dem;
-DA_market_outcome.cost_gen = cost_gen;
-DA_market_outcome.cvx_status = cvx_status;
+% DA_market_outcome.p_gen_DA_tilde = zeros(ng,1);
+% DA_market_outcome.p_dem_DA_tilde = zeros(nd,1);
+DA_market_outcome.p_gen_DA_tilde = p_gen_DA_tilde;
+DA_market_outcome.p_dem_DA_tilde = p_dem_DA_tilde;
+DA_market_outcome.fin_time_master_solve = fin_time_master_solve;
+
 
 if DA_market_outcome.shed_p > 10e-5
-	warning(['WPP: ' num2str(kk) ', Conventional Market, Benders Master Iteration: ' num2str(iter) ', There is load shedding in the Day-Ahead market']);
+	warning(['WPP: ' num2str(kk) ', PCC optimizer, Benders Master Iteration: ' num2str(iter) ', There is load shedding in the Day-Ahead market']);
 	pause(3)
 end
 
